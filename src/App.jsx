@@ -147,6 +147,18 @@ export default function App() {
   };
 
   const solve = (mode, safetyLimit = 2000) => {
+    if (mode === "all" && placedCount(state.placements) === 0) {
+      setSolutions([]);
+      setSearch({
+        ...initialSearch,
+        status: "completed",
+        message:
+          "Empty-board full enumeration is too large for an in-browser exact search. Place or lock a few digits first, then run Find all solutions.",
+      });
+      setCompletableStatus("not yet checked");
+      return;
+    }
+
     workerRef.current?.terminate();
     const worker = new Worker(new URL("./workers/solver.worker.js", import.meta.url), { type: "module" });
     workerRef.current = worker;
@@ -165,7 +177,9 @@ export default function App() {
       }
       if (message.type === "done") {
         const statusMessage = message.paused
-          ? `At least ${message.solutionsFound} solutions found. Enumeration paused at the safety limit.`
+          ? message.timeLimitReached
+            ? `${message.message} At least ${message.solutionsFound} solutions found.`
+            : `At least ${message.solutionsFound} solutions found. Enumeration paused at the safety limit.`
           : message.exact
             ? `Exact total: ${message.solutionsFound} solutions`
             : message.message || "";
@@ -191,6 +205,7 @@ export default function App() {
         mode,
         safetyLimit,
         batchSize: 25,
+        timeLimitMs: mode === "first" ? 30000 : 45000,
       },
     });
   };

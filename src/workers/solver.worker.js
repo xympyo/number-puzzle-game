@@ -101,12 +101,14 @@ async function solve(payload) {
   const mode = payload.mode ?? "all";
   const safetyLimit = mode === "first" ? 1 : payload.safetyLimit ?? 2000;
   const batchSize = payload.batchSize ?? 25;
+  const timeLimitMs = payload.timeLimitMs ?? 45000;
   const { valid, fixed, occupiedMask } = validateFixedPlacements(payload.placements);
   let nodes = 0;
   let solutionsFound = 0;
   let batch = [];
   const deadMemo = new Set();
   let lastYieldAt = startedAt;
+  let timeLimitReached = false;
 
   if (!valid) {
     self.postMessage({
@@ -419,6 +421,10 @@ async function solve(payload) {
 
   async function backtrack(currentMask, remaining, placed, domains) {
     if (cancelRequested || solutionsFound >= safetyLimit) return;
+    if (performance.now() - startedAt > timeLimitMs) {
+      timeLimitReached = true;
+      return;
+    }
     nodes += 1;
 
     const now = performance.now();
@@ -462,6 +468,7 @@ async function solve(payload) {
     const orderedCandidates = orderCandidatesByImpact(bestCandidates, activeDomains, nextRemaining);
     for (const candidate of orderedCandidates) {
       if (cancelRequested || solutionsFound >= safetyLimit) return;
+      if (timeLimitReached) return;
       const nextDomains = narrowDomains(activeDomains, nextRemaining, candidate.mask);
       if (!nextDomains && nextRemaining.length > 0) continue;
       await backtrack(
@@ -480,15 +487,17 @@ async function solve(payload) {
   await backtrack(occupiedMask, remainingDigits, {}, initialDomains);
   emitBatch(true);
 
-  const paused = !cancelRequested && solutionsFound >= safetyLimit && mode !== "first";
+  const paused = !cancelRequested && ((solutionsFound >= safetyLimit && mode !== "first") || timeLimitReached);
   self.postMessage({
     type: "done",
     status: cancelRequested ? "cancelled" : "completed",
     exact: !paused && !cancelRequested,
     paused,
     safetyLimit,
+    timeLimitReached,
     solutionsFound,
     nodes,
     elapsedMs: performance.now() - startedAt,
+    message: timeLimitReached ? `Search paused after ${(timeLimitMs / 1000).toFixed(0)} seconds.` : undefined,
   });
 }
